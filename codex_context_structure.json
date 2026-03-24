@@ -1,0 +1,176 @@
+{
+  "___doc___": "Codex API 请求上下文构建结构（精简版）。原始文件约 41k tokens，此处用占位符替代大段内容。",
+
+  "model": "gpt-5.4",
+
+  "instructions": "[SYSTEM_PROMPT] Codex 人格、行为准则、编辑约束、前端任务指南、格式规则、final/commentary 输出通道等（约 7000 字）",
+
+  "input": [
+    {
+      "___index___": 0,
+      "role": "developer",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "[PERMISSIONS] sandbox_mode=workspace-write，定义文件读写权限、网络访问、命令审批规则（约 9000 字符）"
+        },
+        {
+          "type": "input_text",
+          "text": "[USER_CONFIG] 用中文回答。专业术语保持英文。科研文献相关任务优先使用当前仓库 .codex 下的本地 skills 和 agents。"
+        },
+        {
+          "type": "input_text",
+          "text": "[MEMORY_SYSTEM] 包含：memory 使用决策逻辑 + MEMORY_SUMMARY（所有历史记忆索引）+ 各条 memory 文件全文内容（约 28000 字符）"
+        }
+      ]
+    },
+    {
+      "___index___": 1,
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "[AGENTS.md] 项目级指令，包括：\n  - Available skills 列表（research-ideation, ml-paper-writing, ...）\n  - Global MCP servers（feishu_doc, zotero_local_bridge）\n  - Research agent routing rules\n  - 完整 skill SKILL.md 内嵌（约 23000 字符）"
+        },
+        {
+          "type": "input_text",
+          "text": "[ENVIRONMENT_CONTEXT]\n<environment_context>\n  <cwd>/Users/.../LiteratureRepository</cwd>\n  <shell>zsh</shell>\n  <current_date>2026-03-24</current_date>\n  <timezone>Asia/Shanghai</timezone>\n</environment_context>"
+        }
+      ]
+    },
+    {
+      "___index___": 2,
+      "role": "developer",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "[COLLABORATION_MODE] Default 模式指令，定义 request_user_input 不可用等约束（约 1000 字符）"
+        }
+      ]
+    },
+    {
+      "___index___": 3,
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "目前你有哪些skill，MCP？"
+        }
+      ]
+    },
+
+    "// ====== 以下是多轮 assistant ↔ tool 交互循环 ======",
+
+    {
+      "___index___": 4,
+      "type": "reasoning",
+      "___note___": "加密的 reasoning tokens（chain-of-thought），不可读"
+    },
+    {
+      "___index___": 5,
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "我先核对这个仓库里声明的 skill，以及当前 Codex 实际注册的 MCP，避免直接照旧信息回答。" }]
+    },
+
+    "// ====== 并行 tool calls ======",
+
+    {
+      "___index___": "6-9",
+      "___note___": "assistant 发起 4 个并行 function_call",
+      "calls": [
+        { "type": "function_call", "name": "exec_command", "call_id": "call_A", "arguments": "rg ... AGENTS.md" },
+        { "type": "function_call", "name": "exec_command", "call_id": "call_B", "arguments": "rg ... .codex/config.toml" },
+        { "type": "function_call", "name": "exec_command", "call_id": "call_C", "arguments": "cat ... ~/.codex/config.toml" },
+        { "type": "function_call", "name": "list_mcp_resources", "call_id": "call_D", "arguments": "{}" }
+      ]
+    },
+    {
+      "___index___": "10-13",
+      "___note___": "4 个 function_call_output 对应上面的 call_id",
+      "outputs": [
+        { "type": "function_call_output", "call_id": "call_A", "output": "[rg 搜索结果: skills 列表]" },
+        { "type": "function_call_output", "call_id": "call_B", "output": "[rg 搜索结果: MCP 配置]" },
+        { "type": "function_call_output", "call_id": "call_C", "output": "[config.toml 内容]" },
+        { "type": "function_call_output", "call_id": "call_D", "output": "[MCP resources]" }
+      ]
+    },
+
+    "// ====== 后续多轮类似: reasoning → assistant_text → parallel_tool_calls → tool_outputs → ... ======",
+
+    {
+      "___pattern___": "重复 N 轮",
+      "each_round": [
+        { "type": "reasoning", "encrypted_content": "..." },
+        { "role": "assistant", "content": [{ "type": "output_text", "text": "commentary 进度更新" }] },
+        { "type": "function_call", "name": "exec_command | apply_patch | ...", "arguments": "..." },
+        { "type": "function_call_output", "output": "命令执行结果" }
+      ]
+    },
+
+    "// ====== apply_patch 示例（custom tool）======",
+
+    {
+      "___index___": 48,
+      "type": "custom_tool_call",
+      "name": "apply_patch",
+      "input": "*** Begin Patch\n*** Update File: /path/to/file\n@@ ... patch content ..."
+    },
+    {
+      "___index___": 49,
+      "type": "custom_tool_call_output",
+      "output": "patch applied"
+    }
+  ],
+
+  "tools": [
+    { "___category___": "内置 function tools", "items": [
+      "exec_command      — 在 PTY 中执行命令",
+      "write_stdin       — 向已有 session 写入输入",
+      "list_mcp_resources — 列出 MCP 资源",
+      "list_mcp_resource_templates",
+      "read_mcp_resource",
+      "update_plan       — 更新任务计划",
+      "request_user_input — 向用户提问",
+      "view_image        — 查看本地图片",
+      "spawn_agent       — 创建子 agent",
+      "send_input        — 向子 agent 发消息",
+      "resume_agent      — 恢复子 agent",
+      "wait              — 等待子 agent 完成",
+      "close_agent       — 关闭子 agent",
+      "spawn_agents_on_csv — 按 CSV 行批量创建子 agent"
+    ]},
+    { "___category___": "custom tools", "items": [
+      "apply_patch — unified diff 方式编辑文件（非 function，走 custom_tool_call）"
+    ]},
+    { "___category___": "web_search", "items": [
+      "web_search (external_web_access=false)"
+    ]},
+    { "___category___": "MCP tools (feishu_doc)", "items": [
+      "batch_create_feishu_blocks",
+      "batch_update_feishu_block_text",
+      "create_feishu_document",
+      "create_feishu_folder",
+      "create_feishu_table",
+      "delete_feishu_document_blocks",
+      "fill_whiteboard_with_plantuml",
+      "get_feishu_document_blocks",
+      "get_feishu_document_info",
+      "get_feishu_folder_files",
+      "get_feishu_image_resource",
+      "get_feishu_root_folder_info",
+      "get_feishu_whiteboard_content",
+      "search_feishu_documents",
+      "upload_and_bind_image_to_block"
+    ]}
+  ],
+
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+
+  "reasoning": { "effort": "high" },
+  "text": { "verbosity": "low" },
+  "stream": true,
+  "store": false,
+  "include": ["reasoning.encrypted_content"],
+  "prompt_cache_key": "019d1ff2-..."
+}
