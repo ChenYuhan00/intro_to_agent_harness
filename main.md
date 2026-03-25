@@ -1,43 +1,32 @@
 # Agent Harness 入门
 
-## 这次分享怎么讲
+这篇文档围绕三个问题展开：
 
-这次分享就按仓库里的材料顺序来讲，一共三段：
+1. 一个最小但完整的 agent harness 是怎么工作的。
+2. MCP 和 Skill 分别解决什么问题，它们和 harness 的关系是什么。
+3. 面对同一个真实任务，MCP 路线和 Skill 路线分别长什么样。
 
-1. **先看 `learn-claude-code` 项目实例。** 用一个最小但完整的 agent harness 教会大家：模型怎么和真实世界连接起来，工具怎么接，计划怎么维护，为什么需要子代理、skill loading 和后台任务。
-2. **再讲 MCP 和 Skill。** 前一部分解决的是"agent 框架怎么跑起来"，这一部分解决的是"外部能力怎么接进来、知识怎么按需注入"。
-3. **最后讲一个对比例子。** 用飞书这个实际案例，对比 MCP Server 路线和 Skill + CLI 路线，让前面的抽象概念落地。
-
-仓库里对应的三组材料：
-
-- `learn_claude_code_sample/`：项目实例拆解
-- [mcp_intro.md](./mcp_intro.md)：MCP 讲解
-- [skill_intro.md](./skill_intro.md)：Skill 讲解
-- [tmp/mcp_vs_skill_with_feishu_example.md](./tmp/mcp_vs_skill_with_feishu_example.md)：MCP vs Skill 对比例子
+> [!info] 补充材料
+> - `learn_claude_code_sample/`：基于 `learn-claude-code` 的 harness 机制拆解
+> - [[mcp_intro]]：MCP 介绍
+> - [[skill_intro]]：Skill 介绍
+> - [[mcp_vs_skill_with_feishu_example]]：飞书场景下的 MCP vs Skill 对比
 
 ---
 
-## 第一部分：从 `learn-claude-code` 项目实例理解 Agent Harness
+## 第一部分：从 `learn-claude-code` 理解 Agent Harness
 
-这一部分不从概念空讲，而是直接基于 [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) 这个教学仓库来拆。它的价值在于：代码短、结构清楚，而且把一个编程 agent harness 里最核心的机制都单独做成了可运行示例。
+[learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) 是一个很适合入门的教学项目。它把 agent 的运行过程拆成几个清楚的部件，让人能看见模型决策、工具执行、状态维护和上下文管理是怎么配合起来的。
 
-### 先建立三个基本概念
+### LLM、Agent、Harness
 
-#### LLM
+先区分三个容易混在一起的概念。
 
-LLM（大语言模型）就是 ChatGPT、Claude 背后的技术。输入一段文字，输出一段文字。
+**LLM** 是大语言模型，输入和输出本质上都是文本。关键限制：**LLM 只能生成文本，做不了别的。**
 
-关键限制：**LLM 只能生成文本，做不了别的。**
+**Agent** 是一个系统——模型在循环中自主使用工具来完成任务。它不是单独的模型，也不是单独的框架，而是模型 + 工具 + 循环三者构成的整体。Anthropic 的定义是："LLMs dynamically direct their own processes and tool usage"（[Building Effective Agents](https://www.anthropic.com/research/building-effective-agents)），更简洁的说法是 "LLMs autonomously using tools in a loop"。
 
-#### Agent
-
-Agent 是模型本身。它负责理解任务、做判断、决定下一步该调用什么能力。
-
-#### Harness
-
-Harness 是模型外面的那层控制程序。它负责发请求、执行工具、维护状态、管理上下文、回填结果。
-
-### 三者关系
+**Harness** 是包在模型外面的运行时。它负责向模型发请求、向模型暴露工具、执行模型请求的动作、维护任务状态，并把执行结果重新写回对话上下文。
 
 以 Claude Code 这类编程 agent 为例，整个系统可以粗略看成两端：
 
@@ -57,36 +46,18 @@ Harness 是模型外面的那层控制程序。它负责发请求、执行工具
          只做推理                           负责执行与控制
 ```
 
-- **模型端**：只负责推理，不直接碰本地文件、shell、网络权限。
-- **Harness 端**：负责真实执行，是 agent 真正"能做事"的工程壳。
-- **中间 API**：把模型决策和本地执行循环连接起来。
+> [!tip] 核心判断
+> 真正能完成任务的系统通常不是"一个模型"，而是"模型 + harness"。模型负责思考，harness 负责动手。
 
-一句话：**模型负责思考，harness 负责动手。**
+### 一个最基本的闭环
 
-### 为什么用这个项目来讲
-
-这个项目把一个 agent harness 里最常见的六个机制拆开了：
-
-| 机制 | 解决什么问题 |
-|------|-------------|
-| Agent Loop | 模型只能生成文本，怎么让它持续操作真实世界 |
-| Tool Use | 只给 bash 太粗糙，怎么提供结构化工具 |
-| TodoWrite | 长任务会失忆，怎么维护执行计划 |
-| Subagent | 主上下文会被污染，怎么隔离子任务 |
-| Skill Loading | 领域知识不能全常驻，怎么按需加载 |
-| Background Tasks | 慢操作会阻塞，怎么后台执行 |
-
-下面的讲解顺序也是建议的分享顺序。
-
----
-
-## 1. Agent Loop：一切的地基
-
-模型只能输出文本，不能直接执行命令。Harness 的最小闭环就是：
+从最小视角看，agent harness 的核心就是一个循环：
 
 ```text
-发请求 → 模型回复 → 执行工具 → 回填结果 → 再发请求 → ...
+发送请求 → 模型回复 → 执行工具 → 写回结果 → 再次发送请求
 ```
+
+模型本身不会直接执行 shell、不会直接改文件、也不会直接访问外部系统。它能做的是发出"我想调用某个工具"的结构化请求。Harness 收到这个请求后负责真正执行，然后把结果继续交给模型。
 
 这里最关键的三个词：
 
@@ -94,189 +65,135 @@ Harness 是模型外面的那层控制程序。它负责发请求、执行工具
 - `tool_result`：harness 执行后把结果喂回去
 - `stop_reason`：决定继续循环还是结束
 
-这一层讲明白后，后面所有机制都只是往这个循环上叠能力。
+这就是后面所有机制的共同地基。
 
-详细材料：**[Agent Loop 详解 →](./learn_claude_code_sample/agent_loop.md)**
+### 六个基础机制
 
-## 2. Tool Use：把"能执行"变成"可控地执行"
+`learn-claude-code` 把六个常见的 harness 机制拆成了独立示例：
 
-如果只有一个 `bash` 工具，会有三个问题：
+#### 1. Agent Loop
 
-- 安全边界难控
-- 参数语义不清楚
-- 错误处理不稳定
+Agent loop 解决的是"模型怎么持续工作"。没有 loop，模型只会给出一段回答；有了 loop，模型就可以在每一轮根据新结果决定下一步动作。也正因为有这一层，agent 才不再只是问答系统，而是能逐步完成任务的执行系统。
 
-所以实际 harness 会把能力拆成更细的专用工具，例如 `read_file`、`write_file`、`edit_file`。本质上还是同一个循环，但从"固定执行 shell"变成"按工具名分发到 handler"。
+→ [[learn_claude_code_sample/agent_loop|agent_loop]]
 
-详细材料：**[Tool Use 详解 →](./learn_claude_code_sample/tool_use.md)**
+#### 2. Tool Use
 
-## 3. TodoWrite：让模型自己维护执行计划
+只有一个通用 `bash` 工具时，能力边界、安全限制和参数语义都很模糊。更常见的做法是把动作拆成明确的工具，比如 `read_file`、`write_file`、`edit_file`。这样 harness 对模型开放的能力变得更清楚、更可控，也更容易做权限边界和错误处理。
 
-任务一长，模型会忘记已经做到哪一步。这时需要一个计划工具，让模型自己维护 todo 列表，并把最新状态重新注入上下文。
+→ [[learn_claude_code_sample/tool_use|tool_use]]
 
-这个机制的重点不是 UI，而是：**计划状态也可以被当作工具结果重新写回消息流。**
+#### 3. TodoWrite
 
-详细材料：**[TodoWrite 详解 →](./learn_claude_code_sample/todo_write.md)**
+任务一长，模型就容易丢步骤、重复步骤，或者忘记当前进度。`TodoWrite` 这类机制的作用是把计划状态也纳入运行时，让模型自己维护一份任务清单，并根据最新状态继续推进。这说明一件重要的事：进入上下文的不只是"外部工具执行结果"，也可以是"系统内部状态"。
 
-## 4. Subagent：把探索过程隔离出去
+→ [[learn_claude_code_sample/todo_write|todo_write]]
 
-如果所有中间探索都堆在主线程的 `messages` 里，上下文很快就会变脏。Subagent 的做法是：把某个子任务交给一个新的模型调用，只把结论带回来，不把整段探索历史带回来。
+#### 4. Subagent
 
-核心收益：
+主线程里的上下文是有限的。如果所有探索、试错和分支推理都堆在同一个消息流里，很快就会变得嘈杂。Subagent 的作用是把某个子问题交给一个新的上下文去处理，主代理只拿回结论或摘要。这是一种典型的上下文管理策略。
 
-- 主上下文更干净
-- 子任务可独立推理
-- 父代理只消费摘要，不消费全过程
+→ [[learn_claude_code_sample/subagent|subagent]]
 
-详细材料：**[Subagent 详解 →](./learn_claude_code_sample/subagent.md)**
+#### 5. Skill Loading
 
-## 5. Skill Loading：知识不是一直常驻，而是按需进入
+如果把所有领域知识都常驻在 system prompt 里，上下文会迅速膨胀。更合理的做法是只让技能名称和简短描述常驻，真正相关时再加载对应 `SKILL.md` 的正文。知识不是一直都在，而是在需要的时候进入上下文。这部分也是理解后面 Skill 机制的关键桥梁。
 
-如果把所有技能全文都塞进 system prompt，会非常浪费上下文。所以更合理的方式是：
+→ [[learn_claude_code_sample/skill_loading|skill_loading]]
 
-- 常驻：skill 名称和一句话描述
-- 按需：真正触发时再加载完整 `SKILL.md`
+#### 6. Background Tasks
 
-这一步非常重要，因为它正好是后面讲 Skill 的桥。
+有些操作很慢（测试、编译、批处理、远程任务）。如果主循环必须阻塞等待，整个交互就会变得很差。后台任务把慢操作放到后台执行，等结果准备好后再注入上下文，让 harness 更像一个有调度能力的运行时。
 
-详细材料：**[Skill Loading 详解 →](./learn_claude_code_sample/skill_loading.md)**
+→ [[learn_claude_code_sample/background_tasks|background_tasks]]
 
-## 6. Background Tasks：把慢操作移到后台
-
-有些任务会跑很久，比如测试、构建、爬取。主循环不应该卡住等待，所以需要后台执行，并在完成后通过通知队列把结果补回上下文。
-
-这一步让大家看到：**agent harness 不只是"一问一答"，而是一个有状态、有并发、有调度的运行时。**
-
-详细材料：**[Background Tasks 详解 →](./learn_claude_code_sample/background_tasks.md)**
-
-### 第一部分讲完，应该让听众得到什么
-
-讲完 `learn-claude-code` 这一段，听众应该先建立一个判断框架：
-
-- agent 不是"一个更聪明的 prompt"，而是一套运行时
-- tool、todo、subagent、background task 都是在扩展同一个 loop
-- skill loading 不是附属功能，而是上下文管理机制
-
-有了这个框架，再讲 MCP 和 Skill，听众才知道它们分别插在 harness 的哪一层。
+> [!abstract] 小结
+> Agent 的关键不只是模型能力，更是 harness 如何组织循环、工具、状态和上下文。理解了这一层，再去看 MCP 和 Skill，就更容易看清它们分别插在系统的哪一部分。
 
 ---
 
 ## 第二部分：MCP 和 Skill
 
-前一部分讲的是 agent harness 的运行方式，这一部分讲两种常见扩展点：
+前一部分讨论的是 harness 的运行机制，这一部分讨论两种常见的扩展方式。
 
-- **MCP**：把外部系统能力标准化接进 agent
-- **Skill**：把任务知识和工作流按需注入 agent
+### MCP 解决什么问题
 
-### 先讲 MCP
+MCP（Model Context Protocol）解决的是"外部能力怎么以统一方式接进 AI 应用"。
 
-MCP（Model Context Protocol）要解决的是：不同 AI 应用怎么用统一方式接入外部能力。
+如果模型要访问飞书、GitHub、数据库或本地文件系统，底层都需要有人把这些能力包装出来。MCP 做的事情就是为这种包装提供一个统一协议，让不同 Host 都能用一致的方式连接外部能力。
 
-讲 MCP 时建议按下面这条线讲：
+MCP 这一层关注的是：
 
-1. MCP 是协议，不是模型
-2. 它有 Host / Client / Server 三个角色
-3. Server 可以暴露 tools、resources、prompts 三类能力
-4. Host 连接 Server 后，会把这些能力以结构化方式带进上下文
-5. 所以 MCP 解决的是"连接和标准化接入"
+- Host、Client、Server 之间怎么分工
+- 外部能力如何被声明为 tools、resources、prompts
+- 这些能力如何通过协议被带入上下文
 
-详细材料：**[MCP 讲解 →](./mcp_intro.md)**
+详细内容见 [[mcp_intro]]。
 
-### 再讲 Skill
+### Skill 解决什么问题
 
-Skill 要解决的是另一类问题：某个任务怎么做、遇到什么条件时该触发、需要读哪些补充资料、需要运行哪些脚本。
+Skill 解决的是另一个问题：当 agent 遇到某一类任务时，应该按什么流程做、先检查什么、需要读取哪些资料、什么时候运行哪些脚本。
 
-讲 Skill 时建议抓住这几个点：
+Skill 更像是"任务知识包"和"工作流说明书"的组合。它不是在协议层声明外部能力，而是在上下文层组织任务做法。
 
-1. Skill 是一个带 `SKILL.md` 的目录，不只是"一段 prompt"
-2. Skill 的发现和加载是分层的
-3. `description` 决定它什么时候该被触发
-4. `SKILL.md` 负责主流程，`references/` 和 `scripts/` 负责按需展开
-5. 所以 Skill 解决的是"知识组织和工作流注入"
+Skill 这一层关注的是：
 
-详细材料：**[Skill 讲解 →](./skill_intro.md)**
+- 一个 skill 如何被发现
+- `description` 如何帮助模型判断是否要加载
+- `SKILL.md`、`references/`、`scripts/` 如何分工
+- 为什么 skill 应该按需加载，而不是全量常驻
 
-### 这一部分最重要的一句话
+详细内容见 [[skill_intro]]。
 
-可以把两者先粗略区分成：
+### 两者的区别
 
-- **MCP 偏能力接入**
-- **Skill 偏任务指导**
+> [!note] 一句粗略的区分
+> - **MCP 更偏"能力接入"**——主要回答"系统能调用什么外部能力"
+> - **Skill 更偏"任务指导"**——主要回答"面对这类任务应该怎么做"
 
-也就是：
-
-- MCP 主要回答"agent 能调用什么"
-- Skill 主要回答"agent 遇到这类任务时应该怎么做"
+二者并不冲突。一个完整的 agent 系统里，往往既会有 MCP，也会有 Skill。
 
 ---
 
-## 第三部分：用飞书例子对比 MCP 和 Skill
+## 第三部分：飞书场景下的 MCP 与 Skill 对比
 
-前两部分分别讲了 harness、MCP、Skill，但如果停在概念层，大家还是容易混。最好的收束方式就是上一个真实案例。
+理解概念之后，直接看一个真实任务中的差异：同一件事如果分别走 MCP 路线和 Skill 路线，实际会有什么不同。
 
-这个仓库已经准备好了一个非常适合讲的例子：**飞书操作**。
+飞书场景很适合做这个对比，因为同一类能力既可以通过 MCP Server 暴露，也可以通过 Skill + CLI 的方式间接使用。
 
-它的优点是：
+### MCP 路线
 
-- 同一件事，既可以做成 MCP Server，也可以做成 Skill + CLI
-- 两条路线最终都落到同一套飞书能力实现
-- 差异非常集中地体现在"能力如何暴露给模型"
+模型拿到的是结构化工具定义（tool 名称、描述、参数 schema）。模型知道"有哪些动作可以调"，并且知道参数应该长什么样。调用动作时，走的是协议层。
 
-建议把这个例子当成最后的收束部分。
+### Skill 路线
 
-### 这个例子里要重点对比什么
+模型先拿到的是一份操作说明：什么时候该用这套流程、调用前要做哪些检查、参数说明在哪份 reference 文档里、最终应该如何拼出 CLI 命令。模型先学会"这类任务该怎么做"，再借助 shell 或 CLI 去执行动作。
 
-#### 1. 上下文注入方式不同
+### 重点差异
 
-- **MCP**：注入的是 tool 名称、描述、参数 schema
-- **Skill**：注入的是 `SKILL.md` 里的自然语言操作手册，以及后续按需读取的 reference 文档
+两条路线最终都可能落到同一套底层能力实现，但模型接触它们的方式不一样：
 
-#### 2. 模型知道怎么调用的方式不同
+| | MCP | Skill |
+|---|---|---|
+| **注入形式** | 结构化工具定义 | 自然语言工作流 + 补充文档 |
+| **触发方式** | 协议发现 | 按描述触发、按需加载 |
+| **责任边界** | 宿主如何接入外部服务 | 任务流程如何被组织和约束 |
 
-- **MCP**：模型通过协议自动发现工具
-- **Skill**：模型通过阅读文档学会如何拼命令、如何检查前置条件
-
-#### 3. 宿主承担的责任不同
-
-- **MCP**：宿主负责接入 Server，把工具定义暴露给模型
-- **Skill**：宿主只需要支持技能加载和 shell/文件等基础工具
-
-#### 4. 适用场景不同
-
-- 外部能力已经做成标准服务、希望多宿主复用：更适合 MCP
-- 需要强执行流程、前置检查、文档化工作流：更适合 Skill
-
-详细材料：**[飞书案例：MCP vs Skill →](./tmp/mcp_vs_skill_with_feishu_example.md)**
+完整例子见 [[mcp_vs_skill_with_feishu_example]]。
 
 ---
 
-## 整体收束
+## 总结
 
-按这套顺序讲，整场分享的主线会比较顺：
-
-1. **先用 `learn-claude-code` 建立 agent harness 的运行框架。**
-2. **再把 MCP 和 Skill 放回这个框架里，解释它们分别负责哪一层。**
-3. **最后用飞书案例做对比，让抽象概念落到具体工程实现。**
-
-如果只让听众记住三句话，我建议是：
-
-1. **Agent 不是单个模型，而是"模型 + harness 运行时"。**
-2. **MCP 解决的是外部能力的标准化接入，Skill 解决的是知识和工作流的按需注入。**
-3. **MCP 和 Skill 不是互斥关系，它们常常会在同一个 agent 系统里一起出现。**
+> [!important] 三句核心结论
+> 1. **Agent 通常不是单独一个模型，而是模型和 harness 组成的运行系统。**
+> 2. **MCP 让外部能力以统一协议接入，Skill 让任务知识按需进入上下文。**
+> 3. **MCP 和 Skill 往往不是二选一，而是同一套 agent 系统里的两层机制。**
 
 ---
 
-## 附录：Codex 上下文构建实例
+## 附录：一个真实产品中的上下文长什么样
 
-为了让大家知道一个真实编程 agent 的上下文到底长什么样，这个仓库还附了一个 Codex 请求结构的拆解：
+[[codex_context_structure.json]] 展示的是，在真实产品中，system 指令、developer 指令、用户输入、memory、工具定义、MCP tools 和工具调用结果，是怎样一起组成完整上下文的。
 
-- [codex_context_structure.json](./codex_context_structure.json)
-
-这个例子可以放在分享最后作为补充，帮助大家把前面讲的几件事对应到真实产品里：
-
-- system / developer / user 指令如何分层
-- tools 和 MCP tools 如何一起进入上下文
-- AGENTS.md / skill / memory 这类长期信息如何参与构建
-- 整个运行过程如何表现为 `assistant -> tool_call -> tool_result` 的循环
-
-如果前面的主线是"最小教学实现"，这个附录就是"真实产品实现的上下文切片"。
+如果前面的 `learn-claude-code` 展示的是一个教学型最小实现，这个附录展示的就是一个真实编程 agent 在生产环境中的上下文切片。
