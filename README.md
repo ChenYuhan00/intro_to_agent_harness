@@ -1,5 +1,7 @@
 # Agent Harness 入门
 
+这是一个完整的 agent harness 入门仓库：主文档从整体视角解释 harness、MCP、Skill 及其关系，并配套示例与补充材料，方便直接顺着仓库内容学习和对照。
+
 这篇文档围绕三个问题展开：
 
 1. 一个最小但完整的 agent harness 是怎么工作的。
