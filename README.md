@@ -1,6 +1,8 @@
 # Agent Harness 入门
 
-这是一个完整的 agent harness 入门仓库：主文档从整体视角解释 harness、MCP、Skill 及其关系，并配套示例与补充材料，方便直接顺着仓库内容学习和对照。
+这份文档主要包含三部分内容：agent harness 的基本工作方式，MCP 和 Skill 分别解决什么问题，以及同一个真实任务在 MCP 路线和 Skill 路线下的具体展开方式。文中也配了示例和补充材料，方便对照阅读。
+
+`harness` 的原意是"马具"——套在马身上、让人能控制和驱动马的那套装备。在 agent 语境下，它指的是包在模型外面的运行时框架：负责发请求、暴露工具、执行动作、维护状态、管理上下文。模型负责决定下一步做什么，harness 负责把这些决定真正执行起来。我们现在用的 Claude Code、Codex、OpenClaw，都是这套东西。2026 年 2 月 OpenAI 在 [Harness engineering](https://openai.com/index/harness-engineering/) 一文中用了这个词，把围绕它去搭环境、接工具、做反馈闭环的工作称为 `harness engineering`。文中说的 `agent harness`，指的就是这整套让 agent 能持续工作的运行机制。
 
 这篇文档围绕三个问题展开：
 
@@ -13,6 +15,8 @@
 > - [[mcp_intro]]：MCP 介绍
 > - [[skill_intro]]：Skill 介绍
 > - [[mcp_vs_skill_with_feishu_example]]：飞书场景下的 MCP vs Skill 对比
+> - `codex_context_structure.json`：Codex 对话上下文解包后的精简可读版，用占位符替代了大段原始内容
+> - `codex_context_full.json`：Codex 对话上下文解包后的完整版，保留更完整的原始请求上下文
 
 ---
 
